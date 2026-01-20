@@ -104,6 +104,18 @@ main {
   font-size: 0.875rem !important;
 }
 
+/* Warning Banner */
+.warning-banner {
+  background: #fffaf0;
+  border: 1px solid #f6ad55;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  text-align: center;
+  color: #7c2d12;
+  font-size: 0.875rem;
+}
+
 /* Barcode List */
 .barcode-list {
   background: white;
@@ -147,6 +159,35 @@ main {
 .stat.invalid {
   background: #fed7d7;
   color: #742a2a;
+}
+
+/* Progress Bar */
+.progress-container {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f7fafc;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  color: #4a5568;
+  font-size: 0.875rem;
+  text-align: center;
+  margin: 0;
 }
 
 /* Barcode Items */
@@ -194,6 +235,12 @@ main {
   border: 1px solid #e2e8f0;
   border-radius: 4px;
   background: white;
+}
+
+.generating-badge {
+  color: #667eea;
+  font-size: 0.875rem;
+  font-style: italic;
 }
 
 /* Actions */

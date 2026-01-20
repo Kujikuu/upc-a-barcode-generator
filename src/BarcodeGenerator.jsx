@@ -1,12 +1,15 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import JsBarcode from 'jsbarcode'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
+
+const BATCH_SIZE = 50 // Process 50 barcodes at a time
 
 function BarcodeGenerator() {
   const [barcodes, setBarcodes] = useState([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [progress, setProgress] = useState({ current: 0, total: 0 })
   const fileInputRef = useRef(null)
 
   const validateBarcode = (barcode) => {
@@ -31,6 +34,7 @@ function BarcodeGenerator() {
       })
 
       setBarcodes(processedBarcodes)
+      setProgress({ current: 0, total: 0 })
     }
     reader.readAsText(file)
   }
@@ -63,48 +67,69 @@ function BarcodeGenerator() {
     }
   }
 
+  const generateSingleBarcode = useCallback((barcode) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 226
+    canvas.height = 100
+
+    try {
+      JsBarcode(canvas, barcode.number, {
+        format: 'UPC',
+        width: 2,
+        height: 80,
+        displayValue: true,
+        fontSize: 14,
+        margin: 10
+      })
+      return { ...barcode, dataUrl: canvas.toDataURL('image/png') }
+    } catch (error) {
+      return { ...barcode, valid: false, error: 'Generation failed' }
+    }
+  }, [])
+
   const generateBarcodes = async () => {
     setIsGenerating(true)
+    setProgress({ current: 0, total: barcodes.filter(b => b.valid).length })
 
-    const updatedBarcodes = await Promise.all(
-      barcodes.map(async (barcode) => {
-        if (!barcode.valid) return barcode
+    const validBarcodes = barcodes.map((b, index) => ({ ...b, originalIndex: index }))
+    let updatedBarcodes = [...barcodes]
 
-        // Create a canvas element
-        const canvas = document.createElement('canvas')
-        canvas.width = 226
-        canvas.height = 100
+    // Process in batches to avoid blocking the UI
+    for (let i = 0; i < updatedBarcodes.length; i += BATCH_SIZE) {
+      const batch = updatedBarcodes.slice(i, i + BATCH_SIZE)
+      const processedBatch = await Promise.all(
+        batch.map(async (barcode) => {
+          if (!barcode.valid) return barcode
+          return generateSingleBarcode(barcode)
+        })
+      )
 
-        try {
-          JsBarcode(canvas, barcode.number, {
-            format: 'UPC',
-            width: 2,
-            height: 80,
-            displayValue: true,
-            fontSize: 14,
-            margin: 10
-          })
-
-          const dataUrl = canvas.toDataURL('image/png')
-          return { ...barcode, dataUrl }
-        } catch (error) {
-          return { ...barcode, valid: false, error: 'Generation failed' }
-        }
+      // Update the barcodes array with the processed batch
+      processedBatch.forEach((processedBarcode, batchIndex) => {
+        updatedBarcodes[i + batchIndex] = processedBarcode
       })
-    )
 
-    setBarcodes(updatedBarcodes)
+      // Update state to show progress
+      setBarcodes([...updatedBarcodes])
+      setProgress({ current: Math.min(i + BATCH_SIZE, updatedBarcodes.filter(b => b.valid).length), total: barcodes.filter(b => b.valid).length })
+
+      // Small delay to allow UI to update
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+
     setIsGenerating(false)
+    setProgress({ current: 0, total: 0 })
   }
 
   const downloadZip = async () => {
     const zip = new JSZip()
+    let count = 0
 
     barcodes.forEach((barcode) => {
       if (barcode.valid && barcode.dataUrl) {
-        // Convert data URL to binary
         const base64Data = barcode.dataUrl.split(',')[1]
         zip.file(`${barcode.number}.png`, base64Data, { base64: true })
+        count++
       }
     })
 
@@ -115,6 +140,7 @@ function BarcodeGenerator() {
   const validCount = barcodes.filter(b => b.valid).length
   const invalidCount = barcodes.filter(b => !b.valid).length
   const canDownload = validCount > 0 && barcodes.some(b => b.valid && b.dataUrl)
+  const showProgress = isGenerating && progress.total > 0
 
   return (
     <div className="barcode-generator">
@@ -140,6 +166,13 @@ function BarcodeGenerator() {
         />
       </div>
 
+      {/* Large file warning */}
+      {barcodes.length > 500 && !isGenerating && !barcodes.some(b => b.dataUrl) && (
+        <div className="warning-banner">
+          Large file detected ({barcodes.length} barcodes). Generation may take a minute.
+        </div>
+      )}
+
       {/* Barcode List */}
       {barcodes.length > 0 && (
         <div className="barcode-list">
@@ -151,6 +184,22 @@ function BarcodeGenerator() {
             </div>
           </div>
 
+          {/* Progress Bar */}
+          {showProgress && (
+            <div className="progress-container">
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                />
+              </div>
+              <p className="progress-text">
+                Generating: {progress.current} / {progress.total} barcodes
+                {progress.total > 100 && ` (${Math.round((progress.current / progress.total) * 100)}%)`}
+              </p>
+            </div>
+          )}
+
           <div className="barcode-items">
             {barcodes.map((barcode, index) => (
               <div key={index} className={`barcode-item ${barcode.valid ? 'valid' : 'invalid'}`}>
@@ -158,6 +207,9 @@ function BarcodeGenerator() {
                 {barcode.error && <span className="barcode-error">{barcode.error}</span>}
                 {barcode.valid && barcode.dataUrl && (
                   <img src={barcode.dataUrl} alt={barcode.number} className="barcode-image" />
+                )}
+                {barcode.valid && !barcode.dataUrl && isGenerating && (
+                  <span className="generating-badge">Generating...</span>
                 )}
               </div>
             ))}
@@ -171,7 +223,7 @@ function BarcodeGenerator() {
                 onClick={generateBarcodes}
                 disabled={isGenerating}
               >
-                {isGenerating ? 'Generating...' : 'Generate Barcodes'}
+                {isGenerating ? 'Generating...' : `Generate ${validCount} Barcodes`}
               </button>
             )}
 
@@ -179,6 +231,7 @@ function BarcodeGenerator() {
               <button
                 className="btn btn-success"
                 onClick={downloadZip}
+                disabled={isGenerating}
               >
                 Download ZIP ({validCount} barcodes)
               </button>
