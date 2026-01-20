@@ -1,0 +1,270 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: white;
+}
+
+.app-header h1 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.app-header p {
+  opacity: 0.9;
+  font-size: 1rem;
+}
+
+main {
+  flex: 1;
+  padding: 1rem;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.app-footer {
+  text-align: center;
+  padding: 1rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.875rem;
+}
+
+/* Upload Area */
+.upload-area {
+  background: white;
+  border: 3px dashed #cbd5e0;
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.upload-area:hover {
+  border-color: #667eea;
+  background: #f7fafc;
+}
+
+.upload-area.dragging {
+  border-color: #667eea;
+  background: #edf2f7;
+  transform: scale(1.02);
+}
+
+.upload-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1rem;
+  color: #a0aec0;
+}
+
+.upload-area p {
+  color: #4a5568;
+  font-size: 1.125rem;
+  margin-bottom: 0.5rem;
+}
+
+.upload-hint {
+  color: #a0aec0;
+  font-size: 0.875rem !important;
+}
+
+/* Barcode List */
+.barcode-list {
+  background: white;
+  border-radius: 12px;
+  margin-top: 1.5rem;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.barcode-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f7fafc;
+}
+
+.barcode-list-header h3 {
+  color: #2d3748;
+  font-size: 1rem;
+}
+
+.stats {
+  display: flex;
+  gap: 1rem;
+}
+
+.stat {
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.stat.valid {
+  background: #c6f6d5;
+  color: #22543d;
+}
+
+.stat.invalid {
+  background: #fed7d7;
+  color: #742a2a;
+}
+
+/* Barcode Items */
+.barcode-items {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.barcode-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  flex-wrap: wrap;
+}
+
+.barcode-item:last-child {
+  border-bottom: none;
+}
+
+.barcode-item.invalid {
+  background: #fff5f5;
+}
+
+.barcode-number {
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  color: #2d3748;
+  font-size: 1rem;
+}
+
+.barcode-error {
+  color: #e53e3e;
+  font-size: 0.875rem;
+  background: #fed7d7;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.barcode-image {
+  width: 226px;
+  height: 100px;
+  object-fit: contain;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: white;
+}
+
+/* Actions */
+.actions {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  background: #f7fafc;
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #667eea;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #5a67d8;
+  transform: translateY(-1px);
+}
+
+.btn-success {
+  background: #48bb78;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #38a169;
+  transform: translateY(-1px);
+}
+
+/* Scrollbar */
+.barcode-items::-webkit-scrollbar {
+  width: 8px;
+}
+
+.barcode-items::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.barcode-items::-webkit-scrollbar-thumb {
+  background: #cbd5e0;
+  border-radius: 4px;
+}
+
+.barcode-items::-webkit-scrollbar-thumb:hover {
+  background: #a0aec0;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .app-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .barcode-list-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .barcode-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .btn {
+    width: 100%;
+  }
+}
