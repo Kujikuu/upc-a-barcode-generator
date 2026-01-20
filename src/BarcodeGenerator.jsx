@@ -131,30 +131,99 @@ function BarcodeGenerator() {
   const generateSingleBarcode = useCallback((barcode, format, dims, showNum) => {
     const { widthPx, heightPx } = dims
 
-    // Calculate barcode height - use full height when numbers are hidden
-    const barHeight = showNum ? Math.max(heightPx - 30, 40) : heightPx - 20
+    // UPC-A has 95 modules; with margin (10 on each side = 20), total is 115 modules
+    // Calculate bar width needed to achieve target width
+    const margin = 10
+    const upcModules = 95
+    const totalModules = upcModules + (2 * margin)
+    const barWidth = Math.max(1, Math.floor(widthPx / totalModules))
+
+    // Calculate barcode height (bars only, not including text)
+    const fontSize = showNum ? Math.max(14, Math.floor(heightPx / 10)) : 0
+    const barHeight = heightPx - fontSize - (2 * margin) - 5
 
     const barcodeOptions = {
       format: 'UPC',
       displayValue: showNum,
-      width: 2,
+      width: barWidth,
       height: barHeight,
-      margin: 10,
-      fontSize: showNum ? Math.min(14, heightPx / 6) : 0
+      margin: margin,
+      fontSize: fontSize
     }
 
     try {
       if (format === 'png') {
         const canvas = document.createElement('canvas')
-        canvas.width = widthPx
-        canvas.height = heightPx
         JsBarcode(canvas, barcode.number, barcodeOptions)
+
+        // Fill background with white
+        const ctx = canvas.getContext('2d')
+        ctx.fillStyle = 'white'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+        // If canvas dimensions don't match target, create a properly sized canvas
+        if (canvas.width !== widthPx || canvas.height !== heightPx) {
+          const finalCanvas = document.createElement('canvas')
+          finalCanvas.width = widthPx
+          finalCanvas.height = heightPx
+          const finalCtx = finalCanvas.getContext('2d')
+
+          // White background
+          finalCtx.fillStyle = 'white'
+          finalCtx.fillRect(0, 0, widthPx, heightPx)
+
+          // Center the barcode on the canvas
+          const x = Math.floor((widthPx - canvas.width) / 2)
+          const y = Math.floor((heightPx - canvas.height) / 2)
+          finalCtx.imageSmoothingEnabled = false
+          finalCtx.drawImage(canvas, x, y)
+
+          return { ...barcode, dataUrl: finalCanvas.toDataURL('image/png'), svgString: null }
+        }
+
         return { ...barcode, dataUrl: canvas.toDataURL('image/png'), svgString: null }
       } else {
-        const svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-        JsBarcode(svgElement, barcode.number, barcodeOptions)
-        const svgString = svgElement.outerHTML
-        return { ...barcode, dataUrl: null, svgString }
+        // For SVG, generate and wrap in properly sized svg element
+        const tempSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        JsBarcode(tempSvg, barcode.number, barcodeOptions)
+
+        // Get the actual rendered size
+        const actualWidth = parseInt(tempSvg.getAttribute('width')) || widthPx
+        const actualHeight = parseInt(tempSvg.getAttribute('height')) || heightPx
+
+        // Create final SVG with exact target dimensions
+        const finalSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        finalSvg.setAttribute('width', widthPx)
+        finalSvg.setAttribute('height', heightPx)
+        finalSvg.setAttribute('viewBox', `0 0 ${widthPx} ${heightPx}`)
+        finalSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+
+        // Add white background rectangle
+        const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+        bgRect.setAttribute('width', widthPx)
+        bgRect.setAttribute('height', heightPx)
+        bgRect.setAttribute('fill', 'white')
+        finalSvg.appendChild(bgRect)
+
+        // Add a group to center the barcode if needed
+        if (actualWidth !== widthPx || actualHeight !== heightPx) {
+          const group = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+          const x = Math.floor((widthPx - actualWidth) / 2)
+          const y = Math.floor((heightPx - actualHeight) / 2)
+          group.setAttribute('transform', `translate(${x}, ${y})`)
+
+          // Copy all children from tempSvg to the group
+          while (tempSvg.firstChild) {
+            group.appendChild(tempSvg.firstChild)
+          }
+          finalSvg.appendChild(group)
+        } else {
+          while (tempSvg.firstChild) {
+            finalSvg.appendChild(tempSvg.firstChild)
+          }
+        }
+
+        return { ...barcode, dataUrl: null, svgString: finalSvg.outerHTML }
       }
     } catch (error) {
       return { ...barcode, valid: false, error: 'Generation failed', dataUrl: null, svgString: null }
@@ -379,13 +448,13 @@ function BarcodeGenerator() {
 
           {/* Action Buttons */}
           <div className="actions">
-            {validCount > 0 && !barcodes.some(b => b.valid && (b.dataUrl || b.svgString)) && (
+            {validCount > 0 && (
               <button
                 className="btn btn-primary"
                 onClick={generateBarcodes}
                 disabled={isGenerating}
               >
-                {isGenerating ? 'Generating...' : `Generate ${validCount} Barcodes`}
+                {isGenerating ? 'Generating...' : `Regenerate ${validCount} Barcodes`}
               </button>
             )}
 
