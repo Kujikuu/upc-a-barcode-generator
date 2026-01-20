@@ -1,19 +1,185 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import JsBarcode from 'jsbarcode'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 
-const BATCH_SIZE = 50 // Process 50 barcodes at a time
+const BATCH_SIZE = 50
+const CM_TO_PIXEL = 118.11 // 300 DPI (300 / 2.54)
+const DEFAULT_WIDTH_CM = 2.2
+const DEFAULT_HEIGHT_CM = 0.9557
+const ASPECT_RATIO = DEFAULT_WIDTH_CM / DEFAULT_HEIGHT_CM
 
 function BarcodeGenerator() {
+  // Settings state
+  const [showNumbers, setShowNumbers] = useState(true)
+  const [exportFormat, setExportFormat] = useState('png')
+  const [widthCm, setWidthCm] = useState(DEFAULT_WIDTH_CM)
+  const [heightCm, setHeightCm] = useState(DEFAULT_HEIGHT_CM)
+  const [lockRatio, setLockRatio] = useState(true)
+
+  // Input state (separate from actual state to avoid circular updates)
+  const [widthInput, setWidthInput] = useState(DEFAULT_WIDTH_CM.toFixed(2))
+  const [heightInput, setHeightInput] = useState(DEFAULT_HEIGHT_CM.toFixed(4))
+
+  // Barcode state
   const [barcodes, setBarcodes] = useState([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
   const fileInputRef = useRef(null)
+  const isUpdatingRef = useRef(false)
+
+  // Sync inputs with state when not being edited
+  useEffect(() => {
+    if (!isUpdatingRef.current) {
+      setWidthInput(widthCm.toFixed(2))
+      setHeightInput(heightCm.toFixed(4))
+    }
+  }, [widthCm, heightCm])
+
+  // Calculate dimensions in pixels
+  const dimensions = useMemo(() => ({
+    widthPx: Math.round(widthCm * CM_TO_PIXEL),
+    heightPx: Math.round(heightCm * CM_TO_PIXEL),
+    widthCm,
+    heightCm
+  }), [widthCm, heightCm])
+
+  // Handle width change
+  const handleWidthChange = (value) => {
+    setWidthInput(value)
+    isUpdatingRef.current = true
+    const newWidth = parseFloat(value) || DEFAULT_WIDTH_CM
+    setWidthCm(newWidth)
+    if (lockRatio) {
+      const newHeight = newWidth / ASPECT_RATIO
+      setHeightCm(newHeight)
+      setHeightInput(newHeight.toFixed(4))
+    }
+    setTimeout(() => { isUpdatingRef.current = false }, 0)
+  }
+
+  // Handle height change
+  const handleHeightChange = (value) => {
+    setHeightInput(value)
+    isUpdatingRef.current = true
+    const newHeight = parseFloat(value) || DEFAULT_HEIGHT_CM
+    setHeightCm(newHeight)
+    if (lockRatio) {
+      const newWidth = newHeight * ASPECT_RATIO
+      setWidthCm(newWidth)
+      setWidthInput(newWidth.toFixed(2))
+    }
+    setTimeout(() => { isUpdatingRef.current = false }, 0)
+  }
+
+  // Convert SVG path data to EPS
+  const svgPathToEps = (pathData) => {
+    // Convert SVG path to PostScript commands
+    let eps = pathData
+      // Move commands
+      .replace(/M\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)/g, '$1 $2 moveto')
+      .replace(/m\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)/g, '$1 $2 rmoveto')
+      // Line commands
+      .replace(/L\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)/g, '$1 $2 lineto')
+      .replace(/l\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)/g, '$1 $2 rlineto')
+      // Horizontal line
+      .replace(/H\s+(-?\d+\.?\d*)/g, '$1 lineto')
+      .replace(/h\s+(-?\d+\.?\d*)/g, '$1 rlineto')
+      // Vertical line
+      .replace(/V\s+(-?\d+\.?\d*)/g, 'exch $1 lineto')
+      .replace(/v\s+(-?\d+\.?\d*)/g, 'exch $1 rlineto')
+      // Close path
+      .replace(/Z/g, 'closepath')
+      .replace(/z/g, 'closepath')
+      // Cubic bezier
+      .replace(/C\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)/g,
+        '$1 $2 $3 $4 $5 $6 curveto')
+      .replace(/c\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)/g,
+        '$1 $2 $3 $4 $5 $6 rcurveto')
+      // Remove extra commas and spaces
+      .replace(/,/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return eps
+  }
+
+  // Convert SVG to EPS format
+  const svgToEps = (svgString, widthCm, heightCm) => {
+    try {
+      // Extract the viewBox to get original dimensions
+      const viewBoxMatch = svgString.match(/viewBox="([^"]*)"/)
+      let vbX = 0, vbY = 0, vbWidth = 100, vbHeight = 50
+
+      if (viewBoxMatch) {
+        const coords = viewBoxMatch[1].split(/\s+/).map(Number)
+        if (coords.length === 4) {
+          [vbX, vbY, vbWidth, vbHeight] = coords
+        }
+      }
+
+      // Get all path elements
+      const pathRegex = /<path[^>]*d="([^"]*)"[^>]*>/g
+      const paths = []
+      let match
+      while ((match = pathRegex.exec(svgString)) !== null) {
+        paths.push(match[1])
+      }
+
+      // Get all rect elements
+      const rectRegex = /<rect[^>]*x="([^"]*)"[^>]*y="([^"]*)"[^>]*width="([^"]*)"[^>]*height="([^"]*)"[^>]*>/g
+      let rectMatch
+      while ((rectMatch = rectRegex.exec(svgString)) !== null) {
+        const x = parseFloat(rectMatch[1])
+        const y = parseFloat(rectMatch[2])
+        const w = parseFloat(rectMatch[3])
+        const h = parseFloat(rectMatch[4])
+        paths.push(`M ${x} ${y} h ${w} v ${h} h ${-w} Z`)
+      }
+
+      if (paths.length === 0) {
+        return null
+      }
+
+      // Calculate scale to fit in the target dimensions
+      const scaleX = (widthCm * 28.35) / vbWidth
+      const scaleY = (heightCm * 28.35) / vbHeight
+
+      // Convert paths to PostScript
+      const psPaths = paths.map(p => svgPathToEps(p)).join('\n')
+
+      // Create EPS file
+      const eps = `%!PS-Adobe-3.0 EPSF-3.0
+%%BoundingBox: 0 0 ${Math.round(widthCm * 28.35)} ${Math.round(heightCm * 28.35)}
+%%Creator: Barcode Generator
+%%Title: Barcode
+%%EndComments
+
+% Save state
+save
+
+% Set up coordinate system
+${scaleX} ${scaleY} scale
+${-vbX} ${-vbY} translate
+
+% Draw barcode
+newpath
+${psPaths}
+fill
+
+% Restore state
+restore
+
+%%EOF
+`
+      return eps
+    } catch (error) {
+      console.error('EPS conversion error:', error)
+      return null
+    }
+  }
 
   const validateBarcode = (barcode) => {
-    // UPC-A must be exactly 12 numeric digits
     return /^\d{12}$/.test(barcode)
   }
 
@@ -29,7 +195,8 @@ function BarcodeGenerator() {
           number: line,
           valid: isValid,
           error: isValid ? null : `Invalid: ${line.length !== 12 ? 'must be 12 digits' : 'must contain only numbers'}`,
-          dataUrl: null
+          dataUrl: null,
+          svgString: null
         }
       })
 
@@ -67,23 +234,36 @@ function BarcodeGenerator() {
     }
   }
 
-  const generateSingleBarcode = useCallback((barcode) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = 226
-    canvas.height = 100
+  const generateSingleBarcode = useCallback((barcode, format, dims, showNum) => {
+    const { widthPx, heightPx } = dims
+
+    // Calculate barcode height - use full height when numbers are hidden
+    const barHeight = showNum ? Math.max(heightPx - 30, 40) : heightPx - 20
+
+    const barcodeOptions = {
+      format: 'UPC',
+      displayValue: showNum,
+      width: 2,
+      height: barHeight,
+      margin: 10,
+      fontSize: showNum ? Math.min(14, heightPx / 6) : 0
+    }
 
     try {
-      JsBarcode(canvas, barcode.number, {
-        format: 'UPC',
-        width: 2,
-        height: 80,
-        displayValue: true,
-        fontSize: 14,
-        margin: 10
-      })
-      return { ...barcode, dataUrl: canvas.toDataURL('image/png') }
+      if (format === 'png') {
+        const canvas = document.createElement('canvas')
+        canvas.width = widthPx
+        canvas.height = heightPx
+        JsBarcode(canvas, barcode.number, barcodeOptions)
+        return { ...barcode, dataUrl: canvas.toDataURL('image/png'), svgString: null }
+      } else {
+        const svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        JsBarcode(svgElement, barcode.number, barcodeOptions)
+        const svgString = svgElement.outerHTML
+        return { ...barcode, dataUrl: null, svgString }
+      }
     } catch (error) {
-      return { ...barcode, valid: false, error: 'Generation failed' }
+      return { ...barcode, valid: false, error: 'Generation failed', dataUrl: null, svgString: null }
     }
   }, [])
 
@@ -91,29 +271,28 @@ function BarcodeGenerator() {
     setIsGenerating(true)
     setProgress({ current: 0, total: barcodes.filter(b => b.valid).length })
 
-    const validBarcodes = barcodes.map((b, index) => ({ ...b, originalIndex: index }))
+    const currentDimensions = dimensions
+    const currentFormat = exportFormat
+    const currentShowNumbers = showNumbers
+
     let updatedBarcodes = [...barcodes]
 
-    // Process in batches to avoid blocking the UI
     for (let i = 0; i < updatedBarcodes.length; i += BATCH_SIZE) {
       const batch = updatedBarcodes.slice(i, i + BATCH_SIZE)
       const processedBatch = await Promise.all(
         batch.map(async (barcode) => {
           if (!barcode.valid) return barcode
-          return generateSingleBarcode(barcode)
+          return generateSingleBarcode(barcode, currentFormat, currentDimensions, currentShowNumbers)
         })
       )
 
-      // Update the barcodes array with the processed batch
       processedBatch.forEach((processedBarcode, batchIndex) => {
         updatedBarcodes[i + batchIndex] = processedBarcode
       })
 
-      // Update state to show progress
       setBarcodes([...updatedBarcodes])
       setProgress({ current: Math.min(i + BATCH_SIZE, updatedBarcodes.filter(b => b.valid).length), total: barcodes.filter(b => b.valid).length })
 
-      // Small delay to allow UI to update
       await new Promise(resolve => setTimeout(resolve, 10))
     }
 
@@ -123,27 +302,121 @@ function BarcodeGenerator() {
 
   const downloadZip = async () => {
     const zip = new JSZip()
-    let count = 0
 
     barcodes.forEach((barcode) => {
-      if (barcode.valid && barcode.dataUrl) {
-        const base64Data = barcode.dataUrl.split(',')[1]
-        zip.file(`${barcode.number}.png`, base64Data, { base64: true })
-        count++
+      if (barcode.valid) {
+        const extension = exportFormat
+        if (exportFormat === 'png' && barcode.dataUrl) {
+          const base64Data = barcode.dataUrl.split(',')[1]
+          zip.file(`${barcode.number}.${extension}`, base64Data, { base64: true })
+        } else if (exportFormat === 'svg' && barcode.svgString) {
+          zip.file(`${barcode.number}.${extension}`, barcode.svgString)
+        }
       }
     })
 
     const content = await zip.generateAsync({ type: 'blob' })
-    saveAs(content, 'barcodes.zip')
+    saveAs(content, `barcodes.${exportFormat}.zip`)
   }
 
   const validCount = barcodes.filter(b => b.valid).length
   const invalidCount = barcodes.filter(b => !b.valid).length
-  const canDownload = validCount > 0 && barcodes.some(b => b.valid && b.dataUrl)
+  const canDownload = validCount > 0 && barcodes.some(b => b.valid && (b.dataUrl || b.svgString))
   const showProgress = isGenerating && progress.total > 0
+
+  const renderBarcodePreview = (barcode) => {
+    if (barcode.valid && barcode.dataUrl) {
+      return <img src={barcode.dataUrl} alt={barcode.number} className="barcode-image" />
+    } else if (barcode.valid && barcode.svgString) {
+      return (
+        <div
+          className="barcode-svg-preview"
+          dangerouslySetInnerHTML={{ __html: barcode.svgString }}
+          style={{ maxWidth: Math.min(dimensions.widthPx * 2, 300) + 'px' }}
+        />
+      )
+    } else if (barcode.valid && isGenerating) {
+      return <span className="generating-badge">Generating...</span>
+    }
+    return null
+  }
 
   return (
     <div className="barcode-generator">
+      {/* Settings Panel */}
+      <div className="settings-panel">
+        <h3>Settings</h3>
+
+        <div className="settings-grid">
+          {/* Show Numbers Toggle */}
+          <div className="setting-item">
+            <label className="toggle-switch">
+              <input
+                type="checkbox"
+                checked={showNumbers}
+                onChange={(e) => setShowNumbers(e.target.checked)}
+              />
+              <span className="toggle-slider"></span>
+              <span className="toggle-label">Show Numbers</span>
+            </label>
+          </div>
+
+          {/* Export Format Selector */}
+          <div className="setting-item">
+            <label className="setting-label">Export Format:</label>
+            <select
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value)}
+              className="format-selector"
+            >
+              <option value="png">PNG</option>
+              <option value="svg">SVG</option>
+            </select>
+          </div>
+
+          {/* Size Inputs */}
+          <div className="setting-item size-inputs">
+            <label className="setting-label">Size (cm):</label>
+            <div className="size-inputs-row">
+              <div className="size-input-group">
+                <label>Width</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  max="30"
+                  value={widthInput}
+                  onChange={(e) => handleWidthChange(e.target.value)}
+                  onBlur={() => setWidthInput(widthCm.toFixed(2))}
+                />
+              </div>
+              <div className="size-input-group">
+                <label>Height</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  max="30"
+                  value={heightInput}
+                  onChange={(e) => handleHeightChange(e.target.value)}
+                  onBlur={() => setHeightInput(heightCm.toFixed(4))}
+                />
+              </div>
+              <button
+                className={`lock-ratio-btn ${lockRatio ? 'locked' : ''}`}
+                onClick={() => setLockRatio(!lockRatio)}
+                title={lockRatio ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+              >
+                {lockRatio ? '🔒' : '🔓'}
+              </button>
+            </div>
+            <div className="size-info">
+              Output: {dimensions.widthPx} × {dimensions.heightPx} px
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Upload Area */}
       <div
         className={`upload-area ${isDragging ? 'dragging' : ''}`}
@@ -167,7 +440,7 @@ function BarcodeGenerator() {
       </div>
 
       {/* Large file warning */}
-      {barcodes.length > 500 && !isGenerating && !barcodes.some(b => b.dataUrl) && (
+      {barcodes.length > 500 && !isGenerating && !barcodes.some(b => b.dataUrl || b.svgString) && (
         <div className="warning-banner">
           Large file detected ({barcodes.length} barcodes). Generation may take a minute.
         </div>
@@ -205,19 +478,14 @@ function BarcodeGenerator() {
               <div key={index} className={`barcode-item ${barcode.valid ? 'valid' : 'invalid'}`}>
                 <span className="barcode-number">{barcode.number}</span>
                 {barcode.error && <span className="barcode-error">{barcode.error}</span>}
-                {barcode.valid && barcode.dataUrl && (
-                  <img src={barcode.dataUrl} alt={barcode.number} className="barcode-image" />
-                )}
-                {barcode.valid && !barcode.dataUrl && isGenerating && (
-                  <span className="generating-badge">Generating...</span>
-                )}
+                {renderBarcodePreview(barcode)}
               </div>
             ))}
           </div>
 
           {/* Action Buttons */}
           <div className="actions">
-            {validCount > 0 && !barcodes.some(b => b.valid && b.dataUrl) && (
+            {validCount > 0 && !barcodes.some(b => b.valid && (b.dataUrl || b.svgString)) && (
               <button
                 className="btn btn-primary"
                 onClick={generateBarcodes}
@@ -233,7 +501,7 @@ function BarcodeGenerator() {
                 onClick={downloadZip}
                 disabled={isGenerating}
               >
-                Download ZIP ({validCount} barcodes)
+                Download ZIP ({validCount} {exportFormat.toUpperCase()} files)
               </button>
             )}
           </div>
