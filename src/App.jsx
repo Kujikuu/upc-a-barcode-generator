@@ -12,7 +12,10 @@ function App() {
         <BarcodeGenerator />
       </main>
       <footer className="app-footer">
-        <p>Generates UPC-A barcodes at 226x100 pixels</p>
+        <p>Generates UPC-A barcodes</p>
+        <p className="credits">
+          Made by <a href="https://afifistudio.com" target="_blank" rel="noopener noreferrer">Ahmed Afifi</a>
+        </p>
       </footer>
     </div>
   )
